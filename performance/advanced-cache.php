@@ -29,6 +29,13 @@ function key() {
 
 	// Clean up and normalize cookies.
 	foreach ( $_COOKIE as $key => $value ) {
+
+		// Ignore cookies that begin with a _, assume they're JS-only.
+		if ( substr( $key, 0, 1 ) == '_' ) {
+			unset( $_COOKIE[ $key ] );
+			continue;
+		}
+
 		if ( ! in_array( $key, config( 'ignore_cookies' ) ) ) {
 			$cookies[ $key ] = $value;
 		}
