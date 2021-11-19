@@ -1,45 +1,7 @@
 <?php
-namespace Koddrio\Cache;
+namespace Sail\Cache;
 
-\add_filter( 'the_posts', function( $posts ) {
-	array_map( function( $ID ) { flag( 'post:' . $ID ); },
-		\wp_list_pluck( $posts, 'ID' ) );
-
-	return $posts;
-} );
-
-\add_action( 'shutdown', function() {
-	$expire = expire();
-	if ( empty( $expire ) ) {
-		return;
-	}
-
-	$flags = null;
-	$path = WP_CONTENT_DIR . '/cache/koddrio/flags.json';
-	if ( file_exists( $path ) ) {
-		$flags = json_decode( file_get_contents( $path ), true );
-	}
-
-	if ( ! $flags ) {
-		$flags = [];
-	}
-
-	foreach ( $expire as $flag ) {
-		$flags[ $flag ] = time();
-	}
-
-	file_put_contents( $path, json_encode( $flags ) );
-} );
-
-\add_action( 'clean_post_cache', function( $post_id, $post ) {
-	if ( wp_is_post_revision( $post ) ) {
-		return;
-	}
-
-	expire( 'post:' . $post_id );
-	expire( 'home' );
-	expire( 'feed' );
-}, 10, 2 );
+const CACHE_DIR = WP_CONTENT_DIR . '/cache/sail';
 
 /**
  * Caching configuration settings.
@@ -75,8 +37,9 @@ function key() {
 	// Clean the URL/query vars
 	$parsed = parse_url( 'http://example.org' . $_SERVER['REQUEST_URI'] );
 	$path = $parsed['path'];
+	$query = $parsed['query'] ?? '';
 
-	parse_str( $parsed['query'], $query_vars );
+	parse_str( $query, $query_vars );
 	foreach ( $query_vars as $key => $value ) {
 		if ( in_array( $key, config( 'ignore_query_vars' ) ) ) {
 			unset( $query_vars[ $key ] );
@@ -84,9 +47,9 @@ function key() {
 	}
 
 	return [
-		'https' => $_SERVER['HTTPS'],
-		'method' => $_SERVER['REQUEST_METHOD'],
-		'host' => strtolower( $_SERVER['HTTP_HOST'] ),
+		'https' => $_SERVER['HTTPS'] ?? '',
+		'method' => $_SERVER['REQUEST_METHOD'] ?? '',
+		'host' => strtolower( $_SERVER['HTTP_HOST'] ?? '' ),
 
 		'path' => $path,
 		'query_vars' => $query_vars,
@@ -105,8 +68,7 @@ function key() {
 function get( $key ) {
 	$cache_key = md5( json_encode( $key ) );
 	$level = substr( $cache_key, -2 );
-	$cache_dir = WP_CONTENT_DIR . "/cache/koddrio/{$level}/";
-	$meta_filename = $cache_dir . $cache_key . '.meta';
+	$meta_filename = CACHE_DIR . "/{$level}/{$cache_key}.meta";
 
 	if ( ! file_exists( $meta_filename ) ) {
 		return false;
@@ -119,7 +81,7 @@ function get( $key ) {
 	}
 
 	$cache = $meta;
-	$cache['filename'] = $cache_dir . $cache_key . '.data';
+	$cache['filename'] = CACHE_DIR . "/{$level}/{$cache_key}.data";
 	return $cache;
 }
 
@@ -138,25 +100,23 @@ function set( $key, $value ) {
 
 	$cache_key = md5( json_encode( $key ) );
 	$level = substr( $cache_key, -2 );
-	$cache_dir = WP_CONTENT_DIR . "/cache/koddrio/{$level}/";
 
-	if ( ! wp_mkdir_p( $cache_dir ) ) {
+	if ( ! wp_mkdir_p( CACHE_DIR . "/{$level}/" ) ) {
 		return false;
 	}
 
 	// Open the meta file and acquire a lock.
-	$f = fopen( $cache_dir . $cache_key . '.meta', 'w' );
+	$f = fopen( CACHE_DIR . "/{$level}/{$cache_key}.meta", 'w' );
 	if ( ! flock( $f, LOCK_EX ) ) {
 		fclose( $f );
 		return false;
 	}
 
-	file_put_contents( $cache_dir . $cache_key . '.data', $contents, LOCK_EX );
+	file_put_contents( CACHE_DIR . "/{$level}/{$cache_key}.data", $contents, LOCK_EX );
 
 	// Write the metadata and release the lock.
 	fwrite( $f, $meta );
-	fclose( $f );
-	// flock( $f, LOCK_UN );
+	fclose( $f ); // Releases the lock.
 	return true;
 }
 
@@ -199,7 +159,7 @@ function delete( $key ) {
  *
  * @return string Contents.
  */
-function ob_callback( $contents ) {
+$ob_callback = function ( $contents ) {
 	$key = key();
 	$skip = false;
 
@@ -249,7 +209,7 @@ function ob_callback( $contents ) {
 
 	set( $key, $cache );
 	return $contents;
-}
+};
 
 /**
  * Serve a cached version of a request, if available.
@@ -272,12 +232,11 @@ function serve() {
 	}
 
 	$flags = null;
-	$path = WP_CONTENT_DIR . '/cache/koddrio/flags.json';
-	if ( file_exists( $path ) ) {
-		$flags = json_decode( file_get_contents( $path ), true );
+	if ( file_exists( CACHE_DIR . '/flags.json' ) ) {
+		$flags = json_decode( file_get_contents( CACHE_DIR . '/flags.json' ), true );
 	}
 
-	if ( $flags && $cache['flags'] ) {
+	if ( $flags && ! empty( $cache['flags'] ) ) {
 		foreach ( $flags as $flag => $timestamp ) {
 			if ( in_array( $flag, $cache['flags'] ) && $timestamp > $cache['created'] ) {
 				header( 'X-Cache: expired' );
@@ -299,4 +258,4 @@ function serve() {
 }
 
 serve();
-ob_start('Koddrio\Cache\ob_callback');
+ob_start( $ob_callback );
