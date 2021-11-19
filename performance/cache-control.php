@@ -7,8 +7,12 @@ if ( ! defined( '\Sail\Cache\CACHE_DIR' ) ) {
 }
 
 add_filter( 'the_posts', function( $posts ) {
-	array_map( function( $ID ) { flag( 'post:' . $ID ); },
-		wp_list_pluck( $posts, 'ID' ) );
+	$post_ids = wp_list_pluck( $posts, 'ID' );
+	$blog_id = get_current_blog_id();
+
+	foreach ( $post_ids as $id ) {
+		flag( sprintf( 'post:%d:%d', $blog_id, $id ) );
+	}
 
 	return $posts;
 } );
@@ -18,7 +22,8 @@ add_action( 'clean_post_cache', function( $post_id, $post ) {
 		return;
 	}
 
-	expire( 'post:' . $post_id );
+	$blog_id = get_current_blog_id();
+	expire( sprintf( 'post:%d:%d', $blog_id, $post_id ) );
 }, 10, 2 );
 
 add_action( 'shutdown', function() {
